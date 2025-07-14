@@ -3,7 +3,18 @@
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import axios from 'axios';
 
-// --- Types remain the same ---
+// --- YOUR LIVE URLS ARE NOW IN THE CODE ---
+// This constant holds the URL for your deployed Python/Flask AI service.
+const AI_SERVICE_URL = 'https://vibank-ai-service.onrender.com';
+
+// This constant holds the URL for your deployed Node.js backend.
+// We are not using it yet, but it's here for future features like saving chat history.
+const BACKEND_URL = 'https://vibank-backend.onrender.com';
+// ------------------------------------------
+
+
+// --- The rest of your file is below, with the API call updated ---
+
 interface User { name: string; email: string; role: 'customer' | 'agent'; }
 interface Message {
   id: number; sender: 'user' | 'agent'; text: string; status: 'waiting' | 'in-progress' | 'answered';
@@ -52,18 +63,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setCurrentQuery({ ...nextQuery, status: 'in-progress' });
   };
 
-  // --- THIS IS THE MODIFIED FUNCTION ---
   const getAISuggestion = async () => {
     if (!currentQuery) { speak("No active query."); return; }
-    
-    // If suggestion already exists, just read it aloud again.
-    if (currentQuery.aiSuggestion) {
-        speak(`AI suggestion is: ${currentQuery.aiSuggestion}`);
-        return;
-    }
+    if (currentQuery.aiSuggestion) { speak(`AI suggestion is: ${currentQuery.aiSuggestion}`); return; }
 
     try {
-        const response = await axios.post('http://localhost:5000/predict', { text: currentQuery.text });
+        // The axios call now uses your live AI Service URL
+        const response = await axios.post(`${AI_SERVICE_URL}/predict`, { text: currentQuery.text });
         const suggestedText = response.data.responseText;
         const queryWithSuggestion = { ...currentQuery, aiSuggestion: suggestedText };
         setMessageQueue(prev => prev.map(msg => msg.id === currentQuery.id ? queryWithSuggestion : msg));
@@ -74,7 +80,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         speak("Could not get AI suggestion.");
     }
   };
-  // ------------------------------------
 
   const sendReply = (messageId: number, agentResponseText: string) => {
     const originalQuestionerEmail = messageQueue.find(m => m.id === messageId)?.userEmail || '';

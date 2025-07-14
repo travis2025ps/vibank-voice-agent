@@ -24,8 +24,7 @@ pnpm-debug.log*
 .vscode/
 .idea/
 
-*.safetensors
-*.bin
+
 
 # OS-specific junk
 .DS_Store
