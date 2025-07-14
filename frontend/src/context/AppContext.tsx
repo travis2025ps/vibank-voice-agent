@@ -63,13 +63,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setCurrentQuery({ ...nextQuery, status: 'in-progress' });
   };
 
+  // In src/context/AppContext.tsx
+
+// ... (keep all the other code at the top of the file the same)
+
   const getAISuggestion = async () => {
     if (!currentQuery) { speak("No active query."); return; }
     if (currentQuery.aiSuggestion) { speak(`AI suggestion is: ${currentQuery.aiSuggestion}`); return; }
 
     try {
-        // The axios call now uses your live AI Service URL
-        const response = await axios.post(`${AI_SERVICE_URL}/predict`, { text: currentQuery.text });
+        // --- THIS IS THE FIX ---
+        // We add a 'timeout' configuration to the axios call.
+        // It will now wait up to 60,000 milliseconds (60 seconds) for the server to respond,
+        // which is enough time for a sleeping Render service to wake up.
+        const response = await axios.post(
+            `${AI_SERVICE_URL}/predict`, 
+            { text: currentQuery.text },
+            { timeout: 60000 } // 60-second timeout
+        );
+        // -----------------------
+
         const suggestedText = response.data.responseText;
         const queryWithSuggestion = { ...currentQuery, aiSuggestion: suggestedText };
         setMessageQueue(prev => prev.map(msg => msg.id === currentQuery.id ? queryWithSuggestion : msg));
@@ -77,9 +90,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         speak(`AI suggests: ${suggestedText}`);
     } catch (error) {
         console.error("AI suggestion failed", error);
-        speak("Could not get AI suggestion.");
+        // We also make the error message more helpful for the agent.
+        speak("Could not get AI suggestion. The service might be starting up. Please try again in one minute.");
     }
   };
+
+// ... (keep all the other code at the bottom of the file the same)
 
   const sendReply = (messageId: number, agentResponseText: string) => {
     const originalQuestionerEmail = messageQueue.find(m => m.id === messageId)?.userEmail || '';
