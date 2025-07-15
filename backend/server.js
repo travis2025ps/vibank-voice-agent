@@ -4,57 +4,64 @@ const express = require('express');
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const mongoose = require('mongoose');
-const cors = require('cors'); // We will use this in a more specific way
+const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 8000;
 
-// --- THIS IS THE FIX: More Specific CORS Configuration ---
+// --- Robust CORS Configuration ---
+// This explicitly allows your deployed frontend and your local development environment.
 const allowedOrigins = [
-    'http://localhost:5173', // Your local frontend for development
-    'https://vibank-voice-agent.netlify.app' // Your deployed frontend
+    'http://localhost:5173',
+    'https://vibank-voice-agent.netlify.app' // Make sure this is your correct Netlify URL
 ];
 
-const corsOptions = {
+app.use(cors({
     origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.indexOf(origin) === -1) {
-            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-            return callback(new Error(msg), false);
+        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
         }
-        return callback(null, true);
     }
-};
+}));
+// --------------------------------
 
-// Use the new CORS options
-app.use(cors(corsOptions));
-// --------------------------------------------------------
-
+// --- Standard Middleware and Routes ---
 app.use(express.json());
+// This line ensures that any request to /api/auth will be handled by your auth routes.
 app.use('/api/auth', require('./routes/auth'));
+// ------------------------------------
 
+// Create an HTTP server from our Express app
 const server = http.createServer(app);
+
+// --- Simplified WebSocket Server Setup ---
+// We will attach the WebSocket server but keep its logic minimal for now
+// to ensure it does not interfere with the HTTP routes.
 const wss = new WebSocketServer({ server });
 
-wss.on('connection', (ws, req) => {
-    // ... your existing WebSocket logic (no changes needed here) ...
-    const urlParams = new URLSearchParams(req.url.slice(1));
-    const userEmail = urlParams.get('userEmail');
-    const userRole = urlParams.get('userRole');
+wss.on('connection', (ws) => {
+    console.log('✅ A client connected via WebSocket.');
 
-    if (!userEmail || !userRole) { ws.terminate(); return; }
+    ws.on('message', (message) => {
+        console.log('Received WebSocket message:', message.toString());
+        // For now, we just broadcast the message to all other clients
+        wss.clients.forEach(client => {
+            if (client !== ws && client.readyState === ws.OPEN) {
+                client.send(message.toString());
+            }
+        });
+    });
 
-    console.log(`✅ Client connected: ${userEmail} (Role: ${userRole})`);
-    
-    clients.set(userEmail, { ws, role: userRole });
-
-    ws.on('message', (message) => { /* ... */ });
-    ws.on('close', () => { /* ... */ });
-    ws.on('error', (error) => { /* ... */ });
+    ws.on('close', () => {
+        console.log('❌ A client disconnected from WebSocket.');
+    });
 });
+// ---------------------------------------
 
+// --- Database Connection and Server Startup ---
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log('✅ MongoDB connected...'))
     .catch(err => {
@@ -62,4 +69,5 @@ mongoose.connect(process.env.MONGO_URI)
         process.exit(1);
     });
 
+// Start the server, listening on the combined HTTP/WebSocket server object.
 server.listen(PORT, () => console.log(`✅ Server (HTTP & WebSocket) is running on port ${PORT}`));
