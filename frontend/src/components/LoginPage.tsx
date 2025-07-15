@@ -1,19 +1,25 @@
 // In src/components/LoginPage.tsx
 
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
+
+// We get the backend URL from the environment variables now
+const BACKEND_API_URL = import.meta.env.VITE_BACKEND_API_URL || 'http://localhost:8000';
 
 const LoginPage: React.FC = () => {
     const navigate = useNavigate();
     const { login } = useApp();
     const { isListening, transcript, startListening, stopListening, resetTranscript } = useSpeechRecognition();
 
-    const [customerEmail, setCustomerEmail] = useState('');
-    const [customerPassword, setCustomerPassword] = useState('');
+    const [customerEmail,setCustomerEmail] = useState('');
+    const [customerPassword,setCustomerPassword] = useState('');
+    const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
 
-    // Agent voice login logic
+    // Agent voice login logic remains the same (as it's a demo feature)
     useEffect(() => {
         if (!isListening && transcript) {
             const agentName = transcript.trim();
@@ -30,90 +36,93 @@ const LoginPage: React.FC = () => {
         }
     }, [isListening, transcript, login, navigate, resetTranscript]);
 
-    // Mock customer login
-    const handleCustomerLogin = (e: React.FormEvent) => {
+    // --- THIS IS THE FIX: Real Customer Login Handler ---
+    const handleCustomerLogin = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (customerEmail && customerPassword) {
-            const customerUser = {
-                name: 'Hemanth Reddy',
+        setIsLoading(true);
+        setError('');
+
+        try {
+            // Make a REAL API call to your deployed backend
+            const response = await axios.post(`${BACKEND_API_URL}/api/auth/login`, {
                 email: customerEmail,
-                role: 'customer' as const,
-            };
-            login(customerUser);
+                password: customerPassword,
+            });
+
+            // The backend returns the user object on success
+            const { user } = response.data;
+
+            // Double-check the role before logging in
+            if (user.role !== 'customer') {
+                setError('This login is for customers only.');
+                setIsLoading(false);
+                return;
+            }
+
+            // If successful, call the login function from context
+            login(user);
             navigate('/customer-dashboard');
+
+        } catch (err: any) {
+            // If the backend returns an error (400 Invalid Credentials), display it
+            setError(err.response?.data?.msg || 'Login failed. Please check your credentials.');
+        } finally {
+            setIsLoading(false);
         }
     };
+    // ----------------------------------------------------
 
     // Spacebar listener for voice login
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.code === 'Space' && !isListening) {
-                e.preventDefault();
-                startListening();
-            }
-        };
-        const handleKeyUp = (e: KeyboardEvent) => {
-            if (e.code === 'Space' && isListening) {
-                stopListening();
-            }
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        window.addEventListener('keyup', handleKeyUp);
-        return () => {
-            window.removeEventListener('keydown', handleKeyDown);
-            window.removeEventListener('keyup', handleKeyUp);
-        };
-    }, [isListening, startListening, stopListening]);
+    useEffect(() => { /* ... same as before ... */ }, [isListening, startListening, stopListening]);
 
     return (
         <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white p-4">
-            
-            {/* --- THIS IS THE NEW HEADER SECTION --- */}
-            <header className="text-center mb-12">
-                <h1 className="text-6xl font-bold flex items-center justify-center gap-4 bg-clip-text text-transparent bg-gradient-to-r from-teal-400 to-blue-500">
-                    <svg className="w-14 h-14" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
-                    VIBank
-                </h1>
-                <p className="text-xl text-gray-300 mt-3">The Accessible Banking Platform for Visually Impaired Agents</p>
-                <p className="text-md text-gray-500 mt-1">A seamless experience for customers and agents alike.</p>
-            </header>
-            {/* ------------------------------------ */}
+            {/* ... rest of your JSX ... */}
+            {/* ADD an error display message */}
+            {error && <p className="text-red-400 text-center mb-4 bg-red-900/50 p-2 rounded-lg">{error}</p>}
+            // In LoginPage.tsx, inside the return(...) statement
 
-            <div className="w-full max-w-4xl flex flex-col items-center gap-8">
-                {/* Customer Login Card */}
-                <div className="w-full max-w-md bg-blue-900/50 backdrop-blur-sm p-8 rounded-2xl border border-blue-700">
-                    <form onSubmit={handleCustomerLogin}>
-                        <div className="text-center mb-6">
-                            <span className="text-5xl text-green-400">👥</span>
-                            <h2 className="text-3xl font-bold mt-2">Customer Login</h2>
-                        </div>
-                        <div className="mb-4">
-                            <label className="block mb-1">Email</label>
-                            <input type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} required className="w-full p-3 bg-gray-700 rounded-lg border border-gray-600" />
-                        </div>
-                        <div className="mb-6">
-                            <label className="block mb-1">Password</label>
-                            <input type="password" value={customerPassword} onChange={(e) => setCustomerPassword(e.target.value)} required className="w-full p-3 bg-gray-700 rounded-lg border border-gray-600" />
-                        </div>
-                        <button type="submit" className="w-full p-3 bg-green-600 rounded-lg font-bold">
-                            Login as Customer
-                        </button>
-                    </form>
-                </div>
+<form onSubmit={handleCustomerLogin}>
+    {/* ... other div and h2 tags ... */}
+    
+    <div className="mb-4">
+        <label className="block mb-1">Email</label>
+        {/* --- THIS IS THE FIX --- */}
+        {/* We connect the input to the state */}
+        <input 
+            type="email"
+            value={customerEmail}  // Display the current state value in the box
+            onChange={(e) => setCustomerEmail(e.target.value)} // When user types, call the update function
+            required 
+            className="w-full p-3 bg-gray-700 rounded-lg border border-gray-600" 
+        />
+        {/* -------------------- */}
+    </div>
+    
+    <div className="mb-6">
+        <label className="block mb-1">Password</label>
+        {/* --- THIS IS THE FIX --- */}
+        {/* We do the same for the password input */}
+        <input 
+            type="password"
+            value={customerPassword} // Display the current state value
+            onChange={(e) => setCustomerPassword(e.target.value)} // Call the update function
+            required 
+            className="w-full p-3 bg-gray-700 rounded-lg border border-gray-600" 
+        />
+        {/* -------------------- */}
+    </div>
 
-                {/* Agent Voice Login Section */}
-                <div className="w-full max-w-md text-center p-6 rounded-2xl border-dashed border-2 border-yellow-500">
-                    <h2 className="text-2xl font-bold">Agent Voice Login</h2>
-                    <p className="text-yellow-300 mt-2">Hold <kbd className="px-2 py-1.5 text-xs font-semibold text-gray-800 bg-gray-100 border rounded-lg">Spacebar</kbd> and say your name.</p>
-                    <div className="mt-4 text-5xl">
-                        <span className={isListening ? 'animate-pulse' : ''}>🎙️</span>
-                    </div>
-                </div>
-            </div>
-            
-            <p className="mt-8 text-center text-gray-300">
-                New Customer? <Link to="/signup" className="font-semibold text-green-400 hover:underline">Create an Account</Link>
-            </p>
+    <button 
+        type="submit" 
+        disabled={isLoading}  // The button is disabled if isLoading is true
+        className="w-full p-3 bg-green-600 rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+        {isLoading ? 'Verifying...' : 'Login as Customer'} 
+        {/* The text changes based on the isLoading state */}
+    </button>
+</form>
+            {/* ... rest of your JSX ... */}
         </div>
     );
 };

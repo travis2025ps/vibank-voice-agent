@@ -5,15 +5,20 @@ import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 
-const API_URL = 'http://localhost:8000/api/auth';
+// We get the backend URL from the environment variables
+const BACKEND_API_URL = import.meta.env.VITE_BACKEND_API_URL || 'http://localhost:8000';
 
 const SignUpPage: React.FC = () => {
     const navigate = useNavigate();
     const { login } = useApp();
 
+    // --- THIS IS THE FIX ---
+    // We need to create state variables to hold the input from the form fields.
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    // -------------------------
+
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
@@ -23,12 +28,12 @@ const SignUpPage: React.FC = () => {
         setError('');
 
         try {
-            // Call the register endpoint
-            const response = await axios.post(`${API_URL}/register`, {
+            // Now the 'name', 'email', and 'password' variables exist and can be sent to the backend.
+            const response = await axios.post(`${BACKEND_API_URL}/api/auth/register`, {
                 name,
                 email,
                 password,
-                role: 'customer' // All signups are customers
+                role: 'customer' // All public signups are customers
             });
 
             // Log the user in immediately after successful registration
@@ -36,6 +41,7 @@ const SignUpPage: React.FC = () => {
             navigate('/customer-dashboard');
 
         } catch (err: any) {
+            // If the backend returns an error (e.g., "User already exists"), display it
             setError(err.response?.data?.msg || 'Could not create account. Please try again.');
         } finally {
             setIsLoading(false);
@@ -50,20 +56,42 @@ const SignUpPage: React.FC = () => {
                         <span className="text-5xl text-green-400">📝</span>
                         <h2 className="text-3xl font-bold mt-2">Create Customer Account</h2>
                     </div>
+                    {/* Input field for Name */}
                     <div className="mb-4">
                         <label className="block mb-1">Full Name</label>
-                        <input type="text" value={name} onChange={(e) => setName(e.target.value)} required className="w-full p-3 bg-gray-700 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-green-400" />
+                        <input 
+                            type="text" 
+                            value={name} 
+                            onChange={(e) => setName(e.target.value)} 
+                            required 
+                            className="w-full p-3 bg-gray-700 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-green-400" 
+                        />
                     </div>
+                    {/* Input field for Email */}
                     <div className="mb-4">
                         <label className="block mb-1">Email</label>
-                        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="w-full p-3 bg-gray-700 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-green-400" />
+                        <input 
+                            type="email" 
+                            value={email} 
+                            onChange={(e) => setEmail(e.target.value)} 
+                            required 
+                            className="w-full p-3 bg-gray-700 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-green-400" 
+                        />
                     </div>
+                    {/* Input field for Password */}
                     <div className="mb-6">
                         <label className="block mb-1">Password</label>
-                        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required className="w-full p-3 bg-gray-700 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-green-400" />
+                        <input 
+                            type="password" 
+                            value={password} 
+                            onChange={(e) => setPassword(e.target.value)} 
+                            required 
+                            className="w-full p-3 bg-gray-700 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-green-400" 
+                        />
                     </div>
+                    {/* Display error messages */}
                     {error && <p className="text-red-400 text-center mb-4">{error}</p>}
-                    <button type="submit" disabled={isLoading} className="w-full p-3 bg-green-600 rounded-lg font-bold hover:bg-green-700 transition-colors disabled:bg-gray-500">
+                    <button type="submit" disabled={isLoading} className="w-full p-3 bg-green-600 rounded-lg font-bold hover:bg-green-700 transition-colors disabled:opacity-50">
                         {isLoading ? 'Creating Account...' : 'Sign Up'}
                     </button>
                     <p className="mt-4 text-center text-gray-400">

@@ -1,30 +1,35 @@
-// In src/context/AppContext.tsx
-
-import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
+import React, { createContext, useState, useContext, ReactNode, useEffect, useRef } from 'react';
 import axios from 'axios';
 
-// --- YOUR LIVE URLS ARE NOW IN THE CODE ---
-// This constant holds the URL for your deployed Python/Flask AI service.
-const AI_SERVICE_URL = 'https://vibank-ai-service.onrender.com';
-
-// This constant holds the URL for your deployed Node.js backend.
-// We are not using it yet, but it's here for future features like saving chat history.
-const BACKEND_URL = 'https://vibank-backend.onrender.com';
-// ------------------------------------------
-
-
-// --- The rest of your file is below, with the API call updated ---
-
-interface User { name: string; email: string; role: 'customer' | 'agent'; }
-interface Message {
-  id: number; sender: 'user' | 'agent'; text: string; status: 'waiting' | 'in-progress' | 'answered';
-  userEmail: string; aiSuggestion?: string; agentFinalResponse?: string;
+const WEBSOCKET_URL = import.meta.env.VITE_WEBSOCKET_URL || 'ws://localhost:8000';
+const AI_SERVICE_URL = import.meta.env.VITE_AI_SERVICE_URL || 'http://localhost:5000';
+const BACKEND_API_URL = import.meta.env.VITE_BACKEND_API_URL || 'http://localhost:8000';
+// Types
+interface User {
+  name: string;
+  email: string;
+  role: 'customer' | 'agent';
 }
+
+interface Message {
+  id: number;
+  sender: 'user' | 'agent';
+  text: string;
+  status: 'waiting' | 'in-progress' | 'answered';
+  userEmail: string;
+  aiSuggestion?: string;
+  agentFinalResponse?: string;
+}
+
 interface AppContextType {
-  user: User | null; login: (userData: User) => void; logout: () => void;
-  messageQueue: Message[]; currentQuery: Message | null;
+  user: User | null;
+  login: (userData: User) => void;
+  logout: () => void;
+  messageQueue: Message[];
+  currentQuery: Message | null;
   submitQuestion: (text: string) => void;
-  takeNextQuery: () => void; getAISuggestion: () => void;
+  takeNextQuery: () => void;
+  getAISuggestion: () => void;
   sendReply: (messageId: number, agentResponseText: string) => void;
   clearHistory: () => void;
 }
@@ -32,88 +37,180 @@ interface AppContextType {
 export const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const speak = (text: string) => {
-  try {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    window.speechSynthesis.speak(utterance);
-  } catch (error) { console.error("Speech synthesis failed", error); }
+  const synth = window.speechSynthesis;
+  if (!synth) return;
+  const utterance = new SpeechSynthesisUtterance(text);
+  synth.speak(utterance);
 };
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => JSON.parse(localStorage.getItem('user') || 'null'));
-  const [messageQueue, setMessageQueue] = useState<Message[]>(() => JSON.parse(localStorage.getItem('globalMessageQueue') || '[]'));
+  const [messageQueue, setMessageQueue] = useState<Message[]>([]);
   const [currentQuery, setCurrentQuery] = useState<Message | null>(null);
 
-  useEffect(() => { localStorage.setItem('globalMessageQueue', JSON.stringify(messageQueue)); }, [messageQueue]);
-  const login = (userData: User) => { setUser(userData); };
-  const logout = () => { setUser(null); setCurrentQuery(null); };
-  const clearHistory = () => { if (!user) return; setMessageQueue(prev => prev.filter(msg => msg.userEmail !== user.email)); speak("History cleared."); };
-  
+  const ws = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    if (!user) {
+      if (ws.current) {
+        ws.current.close();
+        ws.current = null;
+      }
+      return;
+    }
+
+    const wsUrl = `${WEBSOCKET_URL}?userEmail=${encodeURIComponent(user.email)}&userRole=${user.role}`;
+    const socket = new WebSocket(wsUrl);
+
+    socket.onopen = () => console.log("✅ WebSocket connection established.");
+    socket.onclose = () => console.log("❌ WebSocket connection closed.");
+    socket.onerror = (error) => console.error("WebSocket error:", error);
+
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log("📩 Received from server:", data);
+
+      switch (data.type) {
+        case 'NEW_QUESTION_IN_QUEUE':
+          setMessageQueue(prev => [...prev, data.payload]);
+          break;
+        case 'NEW_REPLY_FROM_AGENT':
+          setMessageQueue(prev =>
+            prev
+              .map(msg => msg.id === data.payload.id
+                ? { ...msg, status: 'answered' as const }
+                : msg
+              )
+              .concat(data.payload)
+          );
+          break;
+      }
+    };
+
+    ws.current = socket;
+
+    return () => {
+      if (ws.current) {
+        ws.current.close();
+        ws.current = null;
+      }
+    };
+  }, [user]);
+
   const submitQuestion = (text: string) => {
-    if (!text.trim() || !user) return;
-    const newQuestion: Message = { id: Date.now(), sender: 'user', text, status: 'waiting', userEmail: user.email, };
+    if (!text.trim() || !user || !ws.current) return;
+    const newQuestion: Message = {
+      id: Date.now(),
+      sender: 'user',
+      text,
+      status: 'waiting',
+      userEmail: user.email,
+    };
+
     setMessageQueue(prev => [...prev, newQuestion]);
+
+    ws.current.send(JSON.stringify({ type: 'CUSTOMER_QUESTION', payload: newQuestion }));
+  };
+
+  const sendReply = (messageId: number, agentResponseText: string) => {
+    const originalQuestion = messageQueue.find(m => m.id === messageId);
+    if (!originalQuestion || !ws.current) return;
+
+    const agentReplyMessage: Message = {
+      id: originalQuestion.id,
+      sender: 'agent',
+      text: agentResponseText,
+      status: 'answered',
+      userEmail: originalQuestion.userEmail,
+    };
+
+    // --- The NEW, CORRECT code ---
+setMessageQueue(prev => {
+  // First, create an updated version of the queue where the original question is marked as answered.
+  const updatedQueue = prev.map(msg => 
+    msg.id === messageId 
+      ? { ...msg, status: 'answered' as const, agentFinalResponse: agentResponseText } 
+      : msg
+  );
+  
+  // Then, return a new array that includes the updated queue PLUSOf course. This the new agent reply message.
+  return [...updatedQueue, agentReplyMessage];
+});
+    setCurrentQuery(null);
+
+    ws.current.send(JSON.stringify({ type: 'AGENT_REPLY', payload: agentReplyMessage }));
+  };
+
+  const login = (userData: User) => {
+    setUser(userData);
+    localStorage.setItem('user', JSON.stringify(userData));
+  };
+
+  const logout = () => {
+    setUser(null);
+    localStorage.removeItem('user');
+    setMessageQueue([]);
+  };
+
+  const clearHistory = () => {
+    setMessageQueue([]);
+    speak("History cleared.");
   };
 
   const takeNextQuery = () => {
-    const nextQuery = messageQueue.find(msg => msg.status === 'waiting');
-    if (!nextQuery) { speak("The queue is empty."); return; }
-    speak(`Query from ${nextQuery.userEmail}. Customer says: ${nextQuery.text}`);
-    setMessageQueue(prev => prev.map(msg => msg.id === nextQuery.id ? { ...msg, status: 'in-progress' } : msg));
-    setCurrentQuery({ ...nextQuery, status: 'in-progress' });
-  };
-
-  // In src/context/AppContext.tsx
-
-// ... (keep all the other code at the top of the file the same)
-
-  const getAISuggestion = async () => {
-    if (!currentQuery) { speak("No active query."); return; }
-    if (currentQuery.aiSuggestion) { speak(`AI suggestion is: ${currentQuery.aiSuggestion}`); return; }
-
-    try {
-        // --- THIS IS THE FIX ---
-        // We add a 'timeout' configuration to the axios call.
-        // It will now wait up to 60,000 milliseconds (60 seconds) for the server to respond,
-        // which is enough time for a sleeping Render service to wake up.
-        const response = await axios.post(
-            `${AI_SERVICE_URL}/predict`, 
-            { text: currentQuery.text },
-            { timeout: 60000 } // 60-second timeout
-        );
-        // -----------------------
-
-        const suggestedText = response.data.responseText;
-        const queryWithSuggestion = { ...currentQuery, aiSuggestion: suggestedText };
-        setMessageQueue(prev => prev.map(msg => msg.id === currentQuery.id ? queryWithSuggestion : msg));
-        setCurrentQuery(queryWithSuggestion);
-        speak(`AI suggests: ${suggestedText}`);
-    } catch (error) {
-        console.error("AI suggestion failed", error);
-        // We also make the error message more helpful for the agent.
-        speak("Could not get AI suggestion. The service might be starting up. Please try again in one minute.");
+    const next = messageQueue.find(m => m.status === 'waiting');
+    if (next) {
+      setCurrentQuery(next);
+      setMessageQueue(prev =>
+        prev.map(m => m.id === next.id ? { ...m, status: 'in-progress' } : m)
+      );
+    } else {
+      speak("No more queries in the queue.");
     }
   };
 
-// ... (keep all the other code at the bottom of the file the same)
+  const getAISuggestion = async () => {
+    if (!currentQuery) return;
 
-  const sendReply = (messageId: number, agentResponseText: string) => {
-    const originalQuestionerEmail = messageQueue.find(m => m.id === messageId)?.userEmail || '';
-    setMessageQueue(prev => prev.map(msg => msg.id === messageId ? { ...msg, status: 'answered', agentFinalResponse: agentResponseText } : msg));
-    const agentReplyMessage: Message = { id: Date.now(), sender: 'agent', text: agentResponseText, status: 'answered', userEmail: originalQuestionerEmail, };
-    setMessageQueue(prev => [...prev, agentReplyMessage]);
-    setCurrentQuery(null);
+    try {
+      const res = await axios.post(`${AI_SERVICE_URL}/suggest`, {
+        question: currentQuery.text
+      });
+      const suggestion = res.data.suggestion;
+
+      setMessageQueue(prev =>
+        prev.map(m => m.id === currentQuery.id ? { ...m, aiSuggestion: suggestion } : m)
+      );
+      speak("AI suggestion received.");
+    } catch (err) {
+      console.error("Error fetching AI suggestion:", err);
+    }
   };
 
   return (
-    <AppContext.Provider value={{ user, login, logout, messageQueue, currentQuery, submitQuestion, takeNextQuery, getAISuggestion, sendReply, clearHistory }}>
+    <AppContext.Provider
+      value={{
+        user,
+        login,
+        logout,
+        messageQueue,
+        currentQuery,
+        submitQuestion,
+        takeNextQuery,
+        getAISuggestion,
+        sendReply,
+        clearHistory,
+      }}
+    >
       {children}
     </AppContext.Provider>
   );
 };
 
-export const useApp = () => {
+export const useApp = (): AppContextType => {
   const context = useContext(AppContext);
-  if (context === undefined) throw new Error('useApp must be used within an AppProvider');
+  if (!context) {
+    throw new Error("useApp must be used within an AppProvider");
+  }
   return context;
 };
